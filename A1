@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Limpiador de caracteres ocultos</title>
+<style>
+:root{--bg:#f3f5f7;--fg:#15202b;--mut:#5b6773;--card:#fff;--line:#cfd6dd;--acc:#1b5e8a;--hit:#ffd23f;--hitfg:#15202b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161c;--fg:#e8edf2;--mut:#93a1ae;--card:#18212a;--line:#2c3844;--acc:#6fb3e0;--hit:#c99a00;--hitfg:#fff}}
+:root[data-theme="dark"]{--bg:#10161c;--fg:#e8edf2;--mut:#93a1ae;--card:#18212a;--line:#2c3844;--acc:#6fb3e0;--hit:#c99a00;--hitfg:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 "Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub{margin:0 0 16px;color:var(--mut)}
+label{display:block;font-weight:600;margin:16px 0 6px}
+textarea,.out{width:100%;min-height:150px;padding:12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);font:inherit;resize:vertical}
+.out{white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:320px}
+mark{background:var(--hit);color:var(--hitfg);border-radius:3px;padding:0 2px;font:.8em ui-monospace,Menlo,Consolas,monospace}
+.opts{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.opts label{display:flex;gap:8px;align-items:flex-start;font-weight:400;margin:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button{font:inherit;font-weight:600;padding:10px 16px;border-radius:6px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
+button.alt{background:transparent;color:var(--acc)}
+button:focus-visible,textarea:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.95rem}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+code{font:.9em ui-monospace,Menlo,Consolas,monospace}
+.sum{font-weight:600;margin:12px 0 0}
+.ok{color:var(--acc)}
+.wrap{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+<h1>Limpiador de caracteres ocultos</h1>
+<p class="sub">Pega un texto, mira qué caracteres invisibles contiene y copia la versión limpia. Todo ocurre en tu navegador; el texto no se envía a ningún sitio.</p>
+
+<label for="inp">Texto original</label>
+<textarea id="inp" placeholder="Pega aquí tu texto…"></textarea>
+
+<div class="opts">
+<label><input type="checkbox" id="o_inv" checked> Quitar caracteres invisibles (ancho cero, marcas de dirección, control)</label>
+<label><input type="checkbox" id="o_sp" checked> Convertir espacios especiales en espacios normales</label>
+<label><input type="checkbox" id="o_q" checked> Cambiar comillas y apóstrofos tipográficos por rectos</label>
+<label><input type="checkbox" id="o_d"> Cambiar guiones largos (—, –) por guion simple (-)</label>
+<label><input type="checkbox" id="o_e"> Cambiar puntos suspensivos (…) por tres puntos</label>
+<label><input type="checkbox" id="o_ws" checked> Recortar espacios repetidos y al final de línea</label>
+</div>
+
+<div class="sum" id="sum" aria-live="polite"></div>
+
+<label>Texto con los hallazgos marcados</label>
+<div class="out" id="marked" tabindex="0"></div>
+
+<div class="wrap"><table id="tbl" hidden>
+<thead><tr><th>Código</th><th>Nombre</th><th>Veces</th></tr></thead><tbody></tbody></table></div>
+
+<label for="res">Texto limpio</label>
+<textarea id="res" readonly></textarea>
+<div class="row">
+<button id="copy">Copiar texto limpio</button>
+<button id="clear" class="alt">Borrar todo</button>
+<span id="msg" class="ok" aria-live="polite" style="align-self:center"></span>
+</div>
+</main>
+
+<script>
+const INVIS = {
+0x200B:"Espacio de ancho cero",0x200C:"Separador de ancho cero (ZWNJ)",0x200D:"Unión de ancho cero (ZWJ)",
+0x2060:"Unión de palabras (word joiner)",0xFEFF:"Marca de orden de bytes / espacio de ancho cero",
+0x200E:"Marca izquierda a derecha",0x200F:"Marca derecha a izquierda",
+0x202A:"Incrustación izq-der",0x202B:"Incrustación der-izq",0x202C:"Fin de formato direccional",
+0x202D:"Forzar izq-der",0x202E:"Forzar der-izq",0x2066:"Aislamiento izq-der",0x2067:"Aislamiento der-izq",
+0x2068:"Aislamiento automático",0x2069:"Fin de aislamiento",0x00AD:"Guion blando (soft hyphen)",
+0x180E:"Separador de vocales mongol",0x061C:"Marca de letra árabe",
+0x2061:"Aplicación de función",0x2062:"Multiplicación invisible",0x2063:"Separador invisible",0x2064:"Suma invisible"
+};
+const SPACES = {
+0x00A0:"Espacio de no separación",0x1680:"Espacio ogham",0x2000:"En quad",0x2001:"Em quad",0x2002:"Espacio en",
+0x2003:"Espacio em",0x2004:"Espacio de un tercio",0x2005:"Espacio de un cuarto",0x2006:"Espacio de un sexto",
+0x2007:"Espacio numérico",0x2008:"Espacio de puntuación",0x2009:"Espacio fino",0x200A:"Espacio muy fino",
+0x202F:"Espacio fino de no separación",0x205F:"Espacio matemático medio",0x3000:"Espacio ideográfico",
+0x2028:"Separador de línea",0x2029:"Separador de párrafo"
+};
+const TYPO = {
+0x2018:"Comilla simple curva",0x2019:"Apóstrofo curvo",0x201A:"Comilla baja simple",0x201B:"Comilla alta invertida",
+0x201C:"Comilla doble curva (apertura)",0x201D:"Comilla doble curva (cierre)",0x201E:"Comilla doble baja"
+};
+const DASH = {0x2013:"Guion medio (en dash)",0x2014:"Guion largo (em dash)",0x2212:"Signo menos"};
+const ELL = {0x2026:"Puntos suspensivos (un solo carácter)"};
+
+const $ = id => document.getElementById(id);
+const hex = c => "U+" + c.toString(16).toUpperCase().padStart(4,"0");
+const isCtrl = c => (c<32 && c!==9 && c!==10 && c!==13) || (c>=0x7F && c<=0x9F);
+const isTag = c => c>=0xE0000 && c<=0xE007F;
+const isVS = c => (c>=0xFE00 && c<=0xFE0F) || (c>=0xE0100 && c<=0xE01EF);
+
+function classify(c){
+  if(INVIS[c]) return {k:"inv",n:INVIS[c]};
+  if(isCtrl(c)) return {k:"inv",n:"Carácter de control"};
+  if(isTag(c)) return {k:"inv",n:"Carácter de etiqueta Unicode (oculto)"};
+  if(SPACES[c]) return {k:"sp",n:SPACES[c]};
+  if(TYPO[c]) return {k:"q",n:TYPO[c]};
+  if(DASH[c]) return {k:"d",n:DASH[c]};
+  if(ELL[c]) return {k:"e",n:ELL[c]};
+  return null;
+}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+
+function run(){
+  const text = $("inp").value;
+  const opt = {inv:$("o_inv").checked,sp:$("o_sp").checked,q:$("o_q").checked,d:$("o_d").checked,e:$("o_e").checked};
+  const found = new Map();
+  let html = "", clean = "", total = 0;
+  for(const ch of text){
+    const c = ch.codePointAt(0);
+    // Variation selectors: keep when next to emoji is hard to know; report them as hidden
+    const k = isVS(c) ? {k:"inv",n:"Selector de variación (suele acompañar emojis)"} : classify(c);
+    if(!k){ html += esc(ch); clean += ch; continue; }
+    if(k.k==="q"||k.k==="d"||k.k==="e"){
+      // visible characters: only mark when option is active
+      if(!opt[k.k]){ html += esc(ch); clean += ch; continue; }
+    }
+    total++;
+    const key = c; const f = found.get(key)||{n:k.n,count:0}; f.count++; found.set(key,f);
+    html += "<mark title=\""+hex(c)+" "+k.n+"\">"+(k.k==="inv"?"⟨"+hex(c).slice(2)+"⟩":(k.k==="sp"?"␣":esc(ch)))+"</mark>";
+    // build clean text
+    if(k.k==="inv"){ if(!opt.inv) clean += ch; }
+    else if(k.k==="sp"){ if(opt.sp){ clean += (c===0x2028||c===0x2029) ? "\n" : " "; } else clean += ch; }
+    else if(k.k==="q"){ clean += (c===0x201C||c===0x201D||c===0x201E) ? '"' : "'"; }
+    else if(k.k==="d"){ clean += (c===0x2212) ? "-" : "-"; }
+    else if(k.k==="e"){ clean += "..."; }
+  }
+  if($("o_ws").checked){
+    clean = clean.replace(/[ \t]+$/gm,"").replace(/[ \t]{2,}/g," ");
+  }
+  $("marked").innerHTML = html || "<span style='color:var(--mut)'>Aquí verás tu texto con los hallazgos resaltados.</span>";
+  $("res").value = clean;
+  const tb = $("tbl"), body = tb.querySelector("tbody"); body.innerHTML="";
+  [...found.entries()].sort((a,b)=>b[1].count-a[1].count).forEach(([c,f])=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td><code>"+hex(c)+"</code></td><td>"+f.n+"</td><td>"+f.count+"</td>";
+    body.appendChild(tr);
+  });
+  tb.hidden = found.size===0;
+  $("sum").textContent = !text ? "" : total
+    ? "Encontrados " + total + " carácter" + (total===1?"":"es") + " (" + found.size + " tipo" + (found.size===1?"":"s") + ")."
+    : "No se encontraron caracteres ocultos ni especiales.";
+}
+["inp","o_inv","o_sp","o_q","o_d","o_e","o_ws"].forEach(id=>$(id).addEventListener("input",run));
+$("copy").onclick = async () => {
+  const v = $("res").value;
+  try{ await navigator.clipboard.writeText(v); $("msg").textContent = "Copiado"; }
+  catch(e){ $("res").select(); document.execCommand && document.execCommand("copy"); $("msg").textContent = "Copiado"; }
+  setTimeout(()=>$("msg").textContent="",1800);
+};
+$("clear").onclick = () => { $("inp").value=""; run(); $("inp").focus(); };
+run();
+</script>
+</body>
+</html>
